@@ -14,6 +14,10 @@
 #include "Tools/InspectAnimInstanceTool.h"
 #include "Tools/ReloadBridgeModuleTool.h"
 #include "Tools/TriggerInputTool.h"
+#include "Tools/GetConfigValueTool.h"
+#include "Tools/SetConfigValueTool.h"
+#include "Tools/ValidateConfigKeyTool.h"
+#include "Tools/CaptureViewportTool.h"
 
 DEFINE_LOG_CATEGORY(LogSoftUEBridge);
 
@@ -34,6 +38,10 @@ void FSoftUEBridgeModule::StartupModule()
 	Registry.RegisterToolClass<UInspectAnimInstanceTool>();
 	Registry.RegisterToolClass<UReloadBridgeModuleTool>();
 	Registry.RegisterToolClass<UTriggerInputTool>();
+	Registry.RegisterToolClass<UGetConfigValueTool>();
+	Registry.RegisterToolClass<USetConfigValueTool>();
+	Registry.RegisterToolClass<UValidateConfigKeyTool>();
+	Registry.RegisterToolClass<UCaptureViewportTool>();
 
 	UE_LOG(LogSoftUEBridge, Log, TEXT("Registered %d runtime bridge tools"), Registry.GetToolCount());
 }

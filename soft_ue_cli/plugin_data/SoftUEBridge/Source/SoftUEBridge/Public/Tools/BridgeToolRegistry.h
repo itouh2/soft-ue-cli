@@ -49,12 +49,5 @@ private:
 	static FBridgeToolRegistry* Instance;
 };
 
-/** Auto-registration macro -- include BridgeToolRegistry.h in your .cpp to use this */
-#define REGISTER_BRIDGE_TOOL(ToolClass) \
-	static struct F##ToolClass##Registrar \
-	{ \
-		F##ToolClass##Registrar() \
-		{ \
-			FBridgeToolRegistry::Get().RegisterToolClass(ToolClass::StaticClass()); \
-		} \
-	} G##ToolClass##Registrar;
+/** Deprecated: tool registration must happen from module startup, not static initializers. */
+#define REGISTER_BRIDGE_TOOL(ToolClass)
