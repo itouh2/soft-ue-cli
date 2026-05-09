@@ -73,11 +73,11 @@ int32 FBridgeToolRegistry::RemoveToolsForModule(const FString& ModuleName)
 
 	for (const FString& ToolName : ToolNamesToRemove)
 	{
-		if (TObjectPtr<UBridgeToolBase>* Instance = ToolInstances.Find(ToolName))
+		if (TObjectPtr<UBridgeToolBase>* ToolInstance = ToolInstances.Find(ToolName))
 		{
-			if (Instance->Get())
+			if (ToolInstance->Get())
 			{
-				Instance->Get()->RemoveFromRoot();
+				ToolInstance->Get()->RemoveFromRoot();
 			}
 		}
 		ToolInstances.Remove(ToolName);
