@@ -48,6 +48,3 @@ private:
 
 	static FBridgeToolRegistry* Instance;
 };
-
-/** Deprecated: tool registration must happen from module startup, not static initializers. */
-#define REGISTER_BRIDGE_TOOL(ToolClass)
