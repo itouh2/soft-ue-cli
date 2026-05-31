@@ -46,6 +46,16 @@ _JSON_TYPE_TO_PY: dict[str, type] = {
 }
 
 
+def _sanitize_mcp_tool_name(cli_name: str) -> str:
+    """Convert CLI command names to MCP-safe tool identifiers.
+
+    MCP hosts such as Cursor reject tool names containing spaces.
+    CLI routing keeps the original ``cli_name``; only the registered
+    MCP tool name is sanitized.
+    """
+    return cli_name.replace(" ", "_")
+
+
 def _build_signature(params: dict | None) -> inspect.Signature:
     """Build a typed inspect.Signature from a tool's JSON Schema parameters dict.
 
@@ -272,7 +282,8 @@ def create_server():
             fn = _make_tool_fn(name, params)
         fn.__doc__ = description
 
-        mcp.add_tool(fn, name=name, description=description)
+        mcp_name = _sanitize_mcp_tool_name(name)
+        mcp.add_tool(fn, name=mcp_name, description=description)
 
     # Register skills as prompts
     for skill in list_skills():

@@ -16,7 +16,7 @@ mcp = pytest.importorskip("mcp")
 
 from soft_ue_cli.errors import BridgeError, ErrorKind
 from soft_ue_cli.mcp_schema import extract_tools
-from soft_ue_cli.mcp_server import create_server, _make_client_tool_fn
+from soft_ue_cli.mcp_server import create_server, _make_client_tool_fn, _sanitize_mcp_tool_name
 
 
 def test_create_server_returns_fastmcp():
@@ -37,6 +37,18 @@ def test_server_has_prompts():
     server = create_server()
     assert server._prompt_manager is not None
     assert len(server._prompt_manager._prompts) > 0
+
+
+def test_mcp_tool_names_are_cursor_safe():
+    server = create_server()
+    for tool in server._tool_manager._tools.values():
+        assert " " not in tool.name, f"MCP tool name contains space: {tool.name!r}"
+
+
+def test_sanitize_mcp_tool_name_replaces_spaces_only():
+    assert _sanitize_mcp_tool_name("capture viewport") == "capture_viewport"
+    assert _sanitize_mcp_tool_name("pie-session") == "pie-session"
+    assert _sanitize_mcp_tool_name("umg designer apply") == "umg_designer_apply"
 
 
 def test_anim_state_machine_tools_have_native_mcp_types():
@@ -73,7 +85,7 @@ def test_tool_call_maps_no_auto_position(mock_call_tool):
 
     tool_fn = None
     for tool in server._tool_manager._tools.values():
-        if tool.name == "blueprint node add":
+        if tool.name == "blueprint_node_add":
             tool_fn = tool.fn
             break
 
@@ -124,7 +136,7 @@ def test_tool_call_normalizes_add_graph_node_created_nodes(mock_call_tool):
 
     tool_fn = None
     for tool in server._tool_manager._tools.values():
-        if tool.name == "blueprint node add":
+        if tool.name == "blueprint_node_add":
             tool_fn = tool.fn
             break
 
@@ -141,7 +153,7 @@ def test_mcp_add_co_parameter_uses_cli_transform(mock_call_tool):
 
     tool_fn = None
     for tool in server._tool_manager._tools.values():
-        if tool.name == "mutable graph add-parameter":
+        if tool.name == "mutable_graph_add-parameter":
             tool_fn = tool.fn
             break
 
