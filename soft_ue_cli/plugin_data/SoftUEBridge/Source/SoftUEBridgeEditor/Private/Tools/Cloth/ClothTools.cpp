@@ -227,14 +227,24 @@ bool BindClothAssetToSection(
 	if (UClothingAssetBase* CurrentAsset = Mesh->GetSectionClothingAsset(LodIndex, SectionIndex))
 	{
 		CurrentAsset->Modify();
+		// CCB fork patch: 3-arg UnbindFromSkeletalMesh (per-section) is UE 5.8+; fall back to LOD-level on 5.7.
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
 		CurrentAsset->UnbindFromSkeletalMesh(Mesh, LodIndex, SectionIndex);
+#else
+		CurrentAsset->UnbindFromSkeletalMesh(Mesh, LodIndex);
+#endif
 	}
 
 	Asset->Modify();
 	// Repair assets left with a populated LodMap but no section binding by older bridge versions.
 	if (bClearExistingAssetBindings)
 	{
+		// CCB fork patch: 3-arg UnbindFromSkeletalMesh (per-section) is UE 5.8+; INDEX_NONE == all sections, so LOD-level unbind is equivalent on 5.7.
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
 		Asset->UnbindFromSkeletalMesh(Mesh, LodIndex, INDEX_NONE);
+#else
+		Asset->UnbindFromSkeletalMesh(Mesh, LodIndex);
+#endif
 	}
 
 	FSkelMeshSection& Section = Mesh->GetImportedModel()->LODModels[LodIndex].Sections[SectionIndex];
@@ -723,7 +733,12 @@ bool ValidateConvertedChaosClothAsset(UChaosClothAsset* Asset, FString& OutError
 		return false;
 	}
 
+	// CCB fork patch: UChaosClothAsset::HasDataflow() is UE 5.8+; on 5.7 rely on the remaining checks.
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
 	if (Asset->HasDataflow() || Asset->HasValidClothSimulationModels() || HasChaosClothCollectionData(Asset))
+#else
+	if (Asset->HasValidClothSimulationModels() || HasChaosClothCollectionData(Asset))
+#endif
 	{
 		return true;
 	}
@@ -1681,8 +1696,14 @@ FBridgeToolResult UClothConvertTool::Execute(const TSharedPtr<FJsonObject>& Argu
 
 	TSharedPtr<FJsonObject> Result = ChaosClothAssetToJson(NewAsset, OutputAssetPath, false);
 	Result->SetBoolField(TEXT("converted"), true);
+	// CCB fork patch: UChaosClothAsset::HasDataflow() is UE 5.8+; report legacy_collection on 5.7.
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8)
 	Result->SetBoolField(TEXT("dataflow_based"), NewAsset->HasDataflow());
 	Result->SetStringField(TEXT("conversion_mode"), NewAsset->HasDataflow() ? TEXT("dataflow") : TEXT("legacy_collection"));
+#else
+	Result->SetBoolField(TEXT("dataflow_based"), false);
+	Result->SetStringField(TEXT("conversion_mode"), TEXT("legacy_collection"));
+#endif
 	Result->SetStringField(TEXT("skeletal_mesh"), SkeletalMeshPath);
 	Result->SetStringField(TEXT("source_asset_name"), SourceAsset->GetName());
 	Result->SetStringField(TEXT("output_asset"), OutputAssetPath);
