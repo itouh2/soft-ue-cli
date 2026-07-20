@@ -1,9 +1,13 @@
-﻿"""Tests for public command taxonomy metadata."""
+"""Tests for public command taxonomy metadata."""
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 
 import pytest
+
+sys.path.insert(0, str(Path(__file__).parents[2] / "cli"))
 
 from soft_ue_cli.command_catalog import (  # noqa: E402
     command_metadata_as_json,
@@ -280,6 +284,65 @@ def test_commands_probe_metadata_keeps_plugin_requirement_context():
     assert mutable_entry["required_plugins"][0]["name"] == "Mutable"
 
 
+def test_catalog_marks_diagnose_family_as_offline_and_workflow_commands():
+    diagnose = get_command_metadata("diagnose")
+    build_log = get_command_metadata("diagnose build-log")
+    probe = get_command_metadata("diagnose probe")
+
+    assert diagnose["status"] == "canonical"
+    assert diagnose["category"] == "support"
+    assert build_log["layer"] == "offline"
+    assert build_log["requires_bridge"] is False
+    assert probe["layer"] == "workflow"
+    assert probe["requires_bridge"] is True
+    assert probe["requires_pie"] is True
+
+
+def test_catalog_marks_runtime_binary_family_as_offline_workflow_commands():
+    runtime = get_command_metadata("runtime")
+    readiness = get_command_metadata("runtime readiness")
+    install = get_command_metadata("runtime binary plan-install")
+    smoke = get_command_metadata("runtime smoke-plan")
+
+    assert runtime["category"] == "runtime"
+    assert readiness["layer"] == "offline"
+    assert readiness["requires_bridge"] is False
+    assert install["layer"] == "offline"
+    assert smoke["layer"] == "workflow"
+
+
+def test_catalog_marks_expert_context_as_opt_in_workflow_command():
+    expert = get_command_metadata("expert")
+    context = get_command_metadata("expert context")
+
+    assert expert["layer"] == "workflow"
+    assert expert["category"] == "support"
+    assert expert["requires_bridge"] is False
+    assert expert["requires_editor"] is False
+    assert context["layer"] == "workflow"
+    assert context["category"] == "support"
+    assert context["requires_bridge"] is False
+    assert context["requires_editor"] is False
+    assert context["requires_pie"] is False
+    assert context["examples"] == [
+        'soft-ue-cli expert context --task "Build fails" --ue-version 5.8'
+    ]
+
+
+def test_catalog_marks_cloth_family_as_bridge_editor_commands():
+    cloth = get_command_metadata("cloth")
+    query = get_command_metadata("cloth query")
+    apply_weightmap = get_command_metadata("cloth apply-weightmap")
+
+    assert cloth["status"] == "canonical"
+    assert cloth["category"] == "cloth"
+    assert query["layer"] == "bridge"
+    assert query["requires_bridge"] is True
+    assert query["requires_editor"] is True
+    assert apply_weightmap["layer"] == "bridge"
+    assert apply_weightmap["category"] == "cloth"
+
+
 def test_commands_json_contains_sorted_metadata_entries():
     payload = command_metadata_as_json()
 
@@ -319,4 +382,3 @@ def test_all_catalog_entries_have_required_metadata_fields():
 
     for entry in iter_command_metadata():
         assert required <= set(entry), entry["name"]
-

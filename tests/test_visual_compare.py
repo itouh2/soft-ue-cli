@@ -1,9 +1,13 @@
-﻿"""Tests for offline UMG screenshot comparison."""
+"""Tests for offline UMG screenshot comparison."""
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
 
 from PIL import Image
+
+sys.path.insert(0, str(Path(__file__).parents[2] / "cli"))
 
 from soft_ue_cli.visual_compare import compare_umg_screenshots
 
@@ -56,4 +60,3 @@ def test_compare_writes_annotated_diff(tmp_path):
     assert annotated.exists()
     assert result["similarity_score"] == 0.0
     assert result["suggested_adjustments"]
-

@@ -49,9 +49,11 @@ EXCLUDED_COMMANDS: frozenset[str] = frozenset({
     "asset",
     "blueprint",
     "capture",
+    "cloth",
     "umg",
     "metasound",
     "mutable",
+    "runtime",
     "skills",
     "mcp-serve",
     "statetree",
@@ -62,6 +64,7 @@ EXCLUDED_COMMANDS: frozenset[str] = frozenset({
 CLIENT_SIDE_COMMANDS: frozenset[str] = frozenset({
     "status",
     "commands",
+    "mcp-surface-status",
     "wait-for-ready",
     "check-setup",
     "setup",
@@ -127,6 +130,12 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
         },
         "properties_remove": ["calls_file"],
         "required_add": ["calls"],
+    },
+    # run-python-script: script_args is a native JSON array in MCP, forwarded to sys.argv[1:].
+    "run-python-script": {
+        "properties": {
+            "script_args": {"type": "array", "description": "Array of string arguments exposed as sys.argv[1:]"},
+        },
     },
     # exec-console-command: MCP callers may pass a complete command string while
     # argparse exposes the legacy command_parts positional.
@@ -199,6 +208,10 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
             "grid_size": {"type": "array", "description": "[X, Y] layout grid size"},
             "max_grid_size": {"type": "array", "description": "Optional [X, Y] max layout grid size"},
             "blocks": {"type": "array", "description": "Layout blocks with min plus max or size"},
+            "parent_material_node": {
+                "type": "string",
+                "description": "Parent material node reference; adds its Mutable internal tag to ModifierRemoveMeshBlocks RequiredTags",
+            },
             "lod_index": {"type": "integer", "description": "Source mesh LOD index for mesh pin UV layouts"},
             "section_index": {"type": "integer", "description": "Source mesh section/material index for mesh pin UV layouts"},
             "uv_channel": {"type": "integer", "description": "Source mesh UV channel for mesh pin layouts"},

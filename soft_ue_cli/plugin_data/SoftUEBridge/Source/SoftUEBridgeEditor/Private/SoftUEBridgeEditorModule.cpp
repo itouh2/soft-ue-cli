@@ -34,6 +34,9 @@
 #include "Tools/Build/BuildAndRelaunchTool.h"
 #include "Tools/Build/TriggerLiveCodingTool.h"
 
+// Cloth
+#include "Tools/Cloth/ClothTools.h"
+
 // Editor
 #include "Tools/Editor/CaptureScreenshotTool.h"
 
@@ -107,6 +110,7 @@
 #include "Tools/Write/EditorSpawnActorTool.h"
 #include "Tools/Write/EditorSetPropertyTool.h"
 #include "Tools/Write/AddComponentTool.h"
+#include "Tools/Write/BlueprintComponentAddTool.h"
 #include "Tools/Write/AddWidgetTool.h"
 #include "Tools/Write/AddDataTableRowTool.h"
 #include "Tools/Write/AddGraphNodeTool.h"
@@ -206,6 +210,50 @@ void FSoftUEBridgeEditorModule::RegisterAnimationTools()
 	if (!Registry.HasTool(TEXT("skeletal-mesh-socket-remove")))
 	{
 		Registry.RegisterToolClass<USkeletalMeshSocketRemoveTool>();
+	}
+	if (!Registry.HasTool(TEXT("blueprint-component-add")))
+	{
+		Registry.RegisterToolClass<UBlueprintComponentAddTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-query")))
+	{
+		Registry.RegisterToolClass<UClothQueryTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-chaos-query")))
+	{
+		Registry.RegisterToolClass<UClothChaosQueryTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-convert")))
+	{
+		Registry.RegisterToolClass<UClothConvertTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-chaos-stitch")))
+	{
+		Registry.RegisterToolClass<UClothChaosStitchTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-chaos-set-config")))
+	{
+		Registry.RegisterToolClass<UClothChaosSetConfigTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-create")))
+	{
+		Registry.RegisterToolClass<UClothCreateTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-bind")))
+	{
+		Registry.RegisterToolClass<UClothBindTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-set-config")))
+	{
+		Registry.RegisterToolClass<UClothSetConfigTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-apply-weightmap")))
+	{
+		Registry.RegisterToolClass<UClothApplyWeightMapTool>();
+	}
+	if (!Registry.HasTool(TEXT("cloth-set-collision")))
+	{
+		Registry.RegisterToolClass<UClothSetCollisionTool>();
 	}
 
 	UE_LOG(LogSoftUEBridgeEditor, Log, TEXT("Registered deferred editor bridge tools; total tools: %d"), Registry.GetToolCount());
@@ -309,9 +357,15 @@ void FSoftUEBridgeEditorModule::StartupModule()
 
 	// Newly added editor UCLASS tools may not have valid StaticClass() pointers
 	// at module startup in freshly rebuilt editor sessions.
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+	PostEngineInitHandle = FCoreDelegates::GetOnPostEngineInit().AddRaw(
+		this,
+		&FSoftUEBridgeEditorModule::RegisterAnimationTools);
+#else
 	PostEngineInitHandle = FCoreDelegates::OnPostEngineInit.AddRaw(
 		this,
 		&FSoftUEBridgeEditorModule::RegisterAnimationTools);
+#endif
 	DeferredAnimationRegistrationHandle = FTSTicker::GetCoreTicker().AddTicker(
 		FTickerDelegate::CreateRaw(this, &FSoftUEBridgeEditorModule::RegisterAnimationToolsOnTicker));
 
@@ -357,7 +411,11 @@ void FSoftUEBridgeEditorModule::ShutdownModule()
 {
 	if (PostEngineInitHandle.IsValid())
 	{
+#if ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 8
+		FCoreDelegates::GetOnPostEngineInit().Remove(PostEngineInitHandle);
+#else
 		FCoreDelegates::OnPostEngineInit.Remove(PostEngineInitHandle);
+#endif
 		PostEngineInitHandle.Reset();
 	}
 	if (DeferredAnimationRegistrationHandle.IsValid())
