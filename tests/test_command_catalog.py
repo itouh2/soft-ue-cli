@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[2] / "cli"))
 
 from soft_ue_cli.command_catalog import (  # noqa: E402
     command_metadata_as_json,
@@ -158,6 +155,15 @@ def test_catalog_marks_anim_retarget_repoint_as_bridge_editor_command():
     assert meta["layer"] == "bridge"
     assert meta["category"] == "animation"
     assert meta["requires_bridge"] is True
+    assert meta["requires_editor"] is True
+    assert meta["requires_pie"] is False
+
+
+def test_catalog_exec_console_command_examples_cover_multi_pie_targeting():
+    meta = get_command_metadata("exec-console-command")
+
+    assert any("--pie-instance 1" in example for example in meta["examples"])
+    assert any("--player-index 0" in example for example in meta["examples"])
     assert meta["requires_editor"] is True
     assert meta["requires_pie"] is False
 
@@ -333,6 +339,8 @@ def test_catalog_marks_cloth_family_as_bridge_editor_commands():
     cloth = get_command_metadata("cloth")
     query = get_command_metadata("cloth query")
     apply_weightmap = get_command_metadata("cloth apply-weightmap")
+    weld = get_command_metadata("cloth weld")
+    chaos_set_weightmap = get_command_metadata("cloth chaos-set-weightmap")
 
     assert cloth["status"] == "canonical"
     assert cloth["category"] == "cloth"
@@ -341,6 +349,18 @@ def test_catalog_marks_cloth_family_as_bridge_editor_commands():
     assert query["requires_editor"] is True
     assert apply_weightmap["layer"] == "bridge"
     assert apply_weightmap["category"] == "cloth"
+    assert (
+        "soft-ue-cli cloth apply-weightmap /Game/Characters/SK_Cape "
+        "--asset-name CapeCloth --target edge-stiffness --rule constant "
+        "--value 0.75 --section-index 1,3 --section-index 5 --save"
+        in apply_weightmap["examples"]
+    )
+    assert weld["layer"] == "bridge"
+    assert weld["category"] == "cloth"
+    assert weld["requires_editor"] is True
+    assert chaos_set_weightmap["layer"] == "bridge"
+    assert chaos_set_weightmap["category"] == "cloth"
+    assert chaos_set_weightmap["requires_editor"] is True
 
 
 def test_commands_json_contains_sorted_metadata_entries():
@@ -382,3 +402,20 @@ def test_all_catalog_entries_have_required_metadata_fields():
 
     for entry in iter_command_metadata():
         assert required <= set(entry), entry["name"]
+
+
+def test_catalog_marks_session_family_as_bridge_commands():
+    session = get_command_metadata("session")
+    listing = get_command_metadata("session list")
+    ask = get_command_metadata("session ask")
+    leave = get_command_metadata("session leave")
+
+    assert session["status"] == "canonical"
+    assert session["category"] == "session"
+    assert listing["layer"] == "bridge"
+    assert listing["requires_bridge"] is True
+    assert listing["requires_editor"] is False
+    assert ask["layer"] == "bridge"
+    assert ask["category"] == "session"
+    assert leave["layer"] == "bridge"
+    assert leave["requires_bridge"] is True

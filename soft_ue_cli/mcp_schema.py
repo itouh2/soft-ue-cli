@@ -54,6 +54,7 @@ EXCLUDED_COMMANDS: frozenset[str] = frozenset({
     "metasound",
     "mutable",
     "runtime",
+    "session",
     "skills",
     "mcp-serve",
     "statetree",
@@ -86,6 +87,11 @@ CLIENT_SIDE_COMMANDS: frozenset[str] = frozenset({
 #   "required_add": list of field names to require in MCP.
 #   "properties_remove": list of argparse-only fields to hide from MCP.
 TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
+    "find-references": {
+        "properties": {
+            "limit": {"type": "integer", "minimum": 1},
+        },
+    },
     # spawn-actor: location/rotation are X,Y,Z arrays in MCP (not comma strings)
     "spawn-actor": {
         "properties": {
@@ -131,6 +137,24 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
         "properties_remove": ["calls_file"],
         "required_add": ["calls"],
     },
+    "cloth chaos-set-weightmap": {
+        "properties": {
+            "vertices": {"type": "array", "description": "Array of simulation 3D vertex indices"},
+            "center": {"type": "array", "description": "[X, Y, Z] center for radius-based spatial selection"},
+        },
+    },
+    "cloth apply-weightmap": {
+        "properties": {
+            "center": {"type": "array", "description": "[X, Y, Z] center for radius-based spatial vertex selection"},
+            "section_indices": {"type": "array", "description": "Merged source SkeletalMesh section indices whose vertices may be updated"},
+        },
+        "properties_remove": ["section_index"],
+    },
+    "cloth weld": {
+        "properties": {
+            "center": {"type": "array", "description": "[X, Y, Z] center for radius-based spatial vertex selection"},
+        },
+    },
     # run-python-script: script_args is a native JSON array in MCP, forwarded to sys.argv[1:].
     "run-python-script": {
         "properties": {
@@ -142,6 +166,14 @@ TOOL_OVERRIDES: dict[str, dict[str, Any]] = {
     "exec-console-command": {
         "properties": {
             "command": {"type": "string", "description": "Console command to execute"},
+            "pie_instance": {
+                "type": "integer",
+                "description": "FWorldContext::PIEInstance identifying the PIE world; valid only with world=pie",
+            },
+            "player_index": {
+                "type": "integer",
+                "description": "Optional local player controller index inside the selected PIE/game world",
+            },
         },
         "properties_remove": ["command_parts"],
         "required_remove": ["command_parts"],

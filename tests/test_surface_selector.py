@@ -2,12 +2,9 @@
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import httpx
 
-sys.path.insert(0, str(Path(__file__).parents[2] / "cli"))
 
 from soft_ue_cli import surface_selector
 from soft_ue_cli.surface_selector import SurfaceProbe, build_surface_report

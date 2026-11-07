@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 
 def _repo_root() -> Path:
     for parent in Path(__file__).resolve().parents:
@@ -31,6 +33,13 @@ def _plugin_source_path(relative: str) -> Path:
     if monorepo_path.exists():
         return monorepo_path
     return root / "soft_ue_cli" / "plugin_data" / "SoftUEBridge" / relative
+
+
+def _monorepo_agent_guide() -> Path:
+    guide = _repo_root() / "AGENTS.md"
+    if not guide.exists():
+        pytest.skip("monorepo-only AGENTS.md is not part of the public export")
+    return guide
 
 
 def _plugin_root() -> Path:
@@ -397,7 +406,7 @@ def test_bridge_registry_remove_tools_does_not_shadow_singleton_instance():
 
 
 def test_agent_guide_warns_new_tools_against_static_registration_macro():
-    guide = Path(__file__).parents[2].joinpath("AGENTS.md").read_text(encoding="utf-8")
+    guide = _monorepo_agent_guide().read_text(encoding="utf-8")
 
     assert "Do not use REGISTER_BRIDGE_TOOL" in guide
     assert "RegisterToolClass" in guide
@@ -710,6 +719,9 @@ def test_cloth_tools_registered_explicitly_and_use_clothing_asset_apis():
     source = _plugin_source_path(
         "Source/SoftUEBridgeEditor/Private/Tools/Cloth/ClothTools.cpp"
     ).read_text(encoding="utf-8")
+    weightmap_source = _plugin_source_path(
+        "Source/SoftUEBridgeEditor/Private/Utils/BridgeLegacyClothWeightMaps.cpp"
+    ).read_text(encoding="utf-8")
 
     assert "Tools/Cloth/ClothTools.h" in module
     for cls in (
@@ -717,6 +729,7 @@ def test_cloth_tools_registered_explicitly_and_use_clothing_asset_apis():
         "UClothCreateTool",
         "UClothBindTool",
         "UClothSetConfigTool",
+        "UClothWeldTool",
         "UClothApplyWeightMapTool",
         "UClothSetCollisionTool",
         "UClothChaosQueryTool",
@@ -733,18 +746,59 @@ def test_cloth_tools_registered_explicitly_and_use_clothing_asset_apis():
     assert "cloth-chaos-stitch" in header
     assert "cloth-chaos-set-config" in header
     assert "cloth-create" in header
+    assert "cloth-weld" in header
     assert "cloth-apply-weightmap" in header
-    assert "GetAllMeshClothingAssetBindings" in source
+    assert '#include "Tools/Cloth/BridgeClothBindings.h"' in source
+    assert "BridgeClothBindings::Collect" in source
+    assert "GetAllMeshClothingAssetBindings" not in source
+    assert "GetAllLodMeshClothingAssetBindings" not in source
     assert "CreateFromSkeletalMesh" in source
     assert "BindToSkeletalMesh" in source
     assert "ApplyParameterMasks" in source
     assert "EWeightMapTargetCommon::MaxDistance" in source
+    assert "EWeightMapTargetCommon::AnimDriveStiffness" in source
+    assert "FBridgeLegacyWeightMapTarget" in source
+    assert "ResolveBridgeLegacyWeightMapTarget" in source
+    assert "GetBridgeLegacyWeightMapTargetNames" in source
+    assert "ReadBridgeSourceSectionSelection" in source
     assert "bone-distance" in source
+    assert "spatial" in source
     assert "FindBoneIndex" in source
     assert "root_bone is required" in source
     assert "ApplyFalloffCurve" in source
+    assert "BuildSpatialWeightMapValues" in source
+    assert "ApplyBridgeLegacyWeightMapToLodData" in source
+    assert "PreviewLodData" in source
+    assert "GenerateLegacyClothRenderMappings" in source
+    assert "RestorePhysicalOnlyLegacyClothWeightMaps" in source
+    assert "ApplyParameterMasks(false)" in source
+    assert "ApplyLegacyClothRenderMappings(Mesh, Asset, GeneratedMappings, false)" in source
+    assert "PointWeightMap.bEnabled" in weightmap_source
     assert "remove_from_mesh cannot be combined with bind" in source
     assert "return FBridgeToolResult::Error(SaveError)" in source
+
+
+def test_cloth_weld_compacts_legacy_physical_mesh_and_rebuilds_render_mapping():
+    source = _plugin_source_path(
+        "Source/SoftUEBridgeEditor/Private/Tools/Cloth/ClothTools.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "UClothWeldTool" in source
+    assert "WeldLegacyPhysicalMeshVertices" in source
+    assert "BuildLegacyClothWeldSelection" in source
+    assert "RemapLegacyClothWeightMaps" in source
+    assert "RestorePhysicalOnlyLegacyClothWeightMaps" in source
+    assert "GenerateLegacyClothRenderMappings" in source
+    assert "ApplyLegacyClothRenderMappings" in source
+    assert "ClothingMeshUtils::GenerateMeshToMeshVertData" in source
+    assert "PreviewLodData" in source
+    assert "weld selection did not match any physical mesh vertices" in source
+    assert "weld removed all physical mesh triangles" in source
+    assert "MappingData.Num() != RenderPositions.Num()" in source
+    assert '"ChaosCore"' in _plugin_source_path("Source/SoftUEBridgeEditor/SoftUEBridgeEditor.Build.cs").read_text(encoding="utf-8")
+    assert "welded_vertex_count" in source
+    assert "removed_degenerate_triangle_count" in source
+    assert "ApplyParameterMasks(true)" in source
 
 
 def test_cloth_chaos_query_uses_chaos_cloth_asset_facades():
@@ -764,6 +818,12 @@ def test_cloth_chaos_query_uses_chaos_cloth_asset_facades():
     assert "GetNumSeams" in source
     assert "GetNumSeamStitches" in source
     assert "GetDataflowInstance" in source
+    assert "BuildChaosClothGapDiagnostics" in source
+    assert "gap_candidates" in source
+    assert "MaxChaosGapDistanceChecks" in source
+    assert "truncated" in source
+    assert "DumpChaosClothWeightMapVertices" in source
+    assert "is_kinematic" in source
 
 
 def test_cloth_convert_uses_chaos_cloth_asset_exporter_provider():
@@ -805,6 +865,26 @@ def test_cloth_chaos_stitch_uses_seam_facade_and_compacts_mesh():
     assert "Build(OriginalCollections" in source
     assert "stitches_created" in source
     assert "welded_sim_vertex_count" in source
+    assert "dry_run" in source
+    assert "candidate_pairs" in source
+    assert "selection_distance" in source
+    assert "distance_space" in source
+
+
+def test_cloth_chaos_set_weightmap_tool_registered_and_mutates_collection_weight_maps():
+    header = _plugin_source_path("Source/SoftUEBridgeEditor/Public/Tools/Cloth/ClothTools.h").read_text(encoding="utf-8")
+    module = _plugin_source_path("Source/SoftUEBridgeEditor/Private/SoftUEBridgeEditorModule.cpp").read_text(encoding="utf-8")
+    source = _plugin_source_path(
+        "Source/SoftUEBridgeEditor/Private/Tools/Cloth/ClothTools.cpp"
+    ).read_text(encoding="utf-8")
+
+    assert "UClothChaosSetWeightMapTool" in header
+    assert "cloth-chaos-set-weightmap" in header
+    assert "RegisterToolClass<UClothChaosSetWeightMapTool>" in module
+    assert "SelectChaosWeightMapVertices" in source
+    assert "FindOrAddWeightMap" in source
+    assert "SetWeightMap" in source
+    assert "changed_vertex_count" in source
 
 
 def test_cloth_chaos_set_config_uses_collection_property_facade():
@@ -897,7 +977,7 @@ def test_bridge_health_includes_process_identity_for_restart_detection():
 
 
 def test_agent_guide_requires_deferred_registration_for_new_uclass_tools():
-    guide = Path(__file__).parents[2].joinpath("AGENTS.md").read_text(encoding="utf-8")
+    guide = _monorepo_agent_guide().read_text(encoding="utf-8")
 
     assert "OnPostEngineInit" in guide
     assert "newly added UCLASS" in guide
@@ -1155,7 +1235,7 @@ def test_set_node_position_supports_customizable_object_graphs():
 
 
 def test_live_smoke_skill_expects_slot_wiring_macro():
-    content = (_repo_root() / "cli" / "soft_ue_cli" / "skills" / "test-tools.md").read_text(encoding="utf-8")
+    content = (_repo_root() / "soft_ue_cli" / "skills" / "test-tools.md").read_text(encoding="utf-8")
 
     assert "wire-customizable-object-slot-from-table" in content
     assert "run-python-script argv args" in content

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -11,9 +12,9 @@ from unittest.mock import patch
 
 import pytest
 
-sys.path.insert(0, str(Path(__file__).parents[2] / "cli"))
 
 from soft_ue_cli import __main__ as main_mod
+from soft_ue_cli.client import BridgeCallMeta
 from soft_ue_cli.errors import BridgeError, ErrorKind
 from soft_ue_cli.__main__ import (
     _SCRIPTS_DIR,
@@ -852,7 +853,9 @@ def test_run_python_script_by_name(scripts_home, capsys):
     (scripts_home / "runner.py").write_text("print('run')", encoding="utf-8")
     parser = build_parser()
     args = parser.parse_args(["run-python-script", "--name", "runner"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"output": "run"}) as mock_call:
+    with patch(
+        "soft_ue_cli.__main__.call_tool_ex", return_value=({"output": "run"}, BridgeCallMeta())
+    ) as mock_call:
         cmd_run_python_script(args)
     mock_call.assert_called_once_with("run-python-script", {"script_path": str((scripts_home / "runner.py").resolve())})
 
@@ -881,7 +884,7 @@ def test_run_python_script_path_reads_file(tmp_path):
     args = parser.parse_args(["run-python-script", "--script-path", str(script_path), "--world", "pie"])
 
     with patch("soft_ue_cli.__main__._ensure_pie_running") as mock_ensure, patch(
-        "soft_ue_cli.__main__.call_tool", return_value={"output": "ok"}
+        "soft_ue_cli.__main__.call_tool_ex", return_value=({"output": "ok"}, BridgeCallMeta())
     ) as mock_call:
         cmd_run_python_script(args)
 
@@ -905,7 +908,9 @@ def test_run_python_script_allow_unsafe_python_calls_routes_to_bridge_tool():
         "--allow-unsafe-python-calls",
     ])
 
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"output": "ok"}) as mock_call:
+    with patch(
+        "soft_ue_cli.__main__.call_tool_ex", return_value=({"output": "ok"}, BridgeCallMeta())
+    ) as mock_call:
         cmd_run_python_script(args)
 
     mock_call.assert_called_once_with(
@@ -931,7 +936,9 @@ def test_run_python_script_args_route_to_bridge_tool_sys_argv(tmp_path):
         "--flag=value",
     ])
 
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"output": "ok"}) as mock_call:
+    with patch(
+        "soft_ue_cli.__main__.call_tool_ex", return_value=({"output": "ok"}, BridgeCallMeta())
+    ) as mock_call:
         cmd_run_python_script(args)
 
     mock_call.assert_called_once_with(
@@ -979,7 +986,6 @@ def test_run_python_script_relaunch_on_crash_retries_once(tmp_path, monkeypatch,
         "5",
     ])
 
-    call_results = iter([{}, {"success": True, "output": "retry"}])
     health_results = iter([
         {"error": "connection refused"},
         {"error": "not ready"},
@@ -990,12 +996,16 @@ def test_run_python_script_relaunch_on_crash_retries_once(tmp_path, monkeypatch,
     monkeypatch.setattr(main_mod.subprocess, "Popen", lambda command, **kwargs: popen_calls.append((command, kwargs)))
     monkeypatch.setattr(main_mod.time, "sleep", lambda _seconds: None)
 
-    with patch("soft_ue_cli.__main__.call_tool", side_effect=lambda *_args, **_kwargs: next(call_results)) as mock_call, patch(
+    with patch("soft_ue_cli.__main__.call_tool", return_value={}) as mock_call, patch(
+        "soft_ue_cli.__main__.call_tool_ex",
+        return_value=({"success": True, "output": "retry"}, BridgeCallMeta()),
+    ) as mock_call_ex, patch(
         "soft_ue_cli.__main__.health_check", side_effect=lambda **_kwargs: next(health_results)
     ):
         cmd_run_python_script(args)
 
-    assert mock_call.call_count == 2
+    assert mock_call.call_count == 1
+    assert mock_call_ex.call_count == 1
     assert popen_calls[0][0] == [str(editor_exe.resolve()), str(project.resolve())]
     result = json.loads(capsys.readouterr().out)
     assert result["success"] is True
@@ -1021,10 +1031,9 @@ def test_run_python_script_relaunch_on_bridge_error_retries_once(tmp_path, monke
         "5",
     ])
 
-    call_results = iter([
-        BridgeError(ErrorKind.EXPECTED, "cannot connect to SoftUEBridge", "run-python-script", {"script": "print('retry')"}),
-        {"success": True, "output": "retry"},
-    ])
+    bridge_error = BridgeError(
+        ErrorKind.EXPECTED, "cannot connect to SoftUEBridge", "run-python-script", {"script": "print('retry')"}
+    )
     health_results = iter([
         {"error": "connection refused"},
         {"error": "not ready"},
@@ -1032,20 +1041,19 @@ def test_run_python_script_relaunch_on_bridge_error_retries_once(tmp_path, monke
     ])
     popen_calls = []
 
-    def fake_call_tool(*_args, **_kwargs):
-        result = next(call_results)
-        if isinstance(result, BridgeError):
-            raise result
-        return result
-
     monkeypatch.setattr(main_mod.subprocess, "Popen", lambda command, **kwargs: popen_calls.append((command, kwargs)))
     monkeypatch.setattr(main_mod.time, "sleep", lambda _seconds: None)
 
-    with patch("soft_ue_cli.__main__.call_tool", side_effect=fake_call_tool), patch(
+    with patch("soft_ue_cli.__main__.call_tool", side_effect=bridge_error) as mock_call, patch(
+        "soft_ue_cli.__main__.call_tool_ex",
+        return_value=({"success": True, "output": "retry"}, BridgeCallMeta()),
+    ) as mock_call_ex, patch(
         "soft_ue_cli.__main__.health_check", side_effect=lambda **_kwargs: next(health_results)
     ):
         cmd_run_python_script(args)
 
+    assert mock_call.call_count == 1
+    assert mock_call_ex.call_count == 1
     assert popen_calls[0][0] == [str(editor_exe.resolve()), str(project.resolve())]
     result = json.loads(capsys.readouterr().out)
     assert result["success"] is True
@@ -1057,7 +1065,7 @@ def test_run_python_script_world_pie_auto_start():
     args = parser.parse_args(["run-python-script", "--script", "print('ok')", "--world", "pie", "--auto-start-pie"])
 
     with patch("soft_ue_cli.__main__._ensure_pie_running") as mock_ensure, patch(
-        "soft_ue_cli.__main__.call_tool", return_value={"output": "ok"}
+        "soft_ue_cli.__main__.call_tool_ex", return_value=({"output": "ok"}, BridgeCallMeta())
     ):
         cmd_run_python_script(args)
 
@@ -2149,6 +2157,32 @@ def test_cmd_exec_console_command_forwards_args():
     )
 
 
+def test_cmd_exec_console_command_forwards_pie_instance_with_local_player():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["exec-console-command", "--pie-instance", "2", "--player-index", "1", "stat", "fps"]
+    )
+
+    with patch("soft_ue_cli.__main__._ensure_pie_running"), patch(
+        "soft_ue_cli.__main__._run_tool", return_value={"success": True}
+    ) as mock_run:
+        cmd_exec_console_command(args)
+
+    mock_run.assert_called_once_with(
+        "exec-console-command",
+        {"command": "stat fps", "world": "pie", "pie_instance": 2, "player_index": 1},
+    )
+
+
+def test_parser_exec_console_command_rejects_pie_instance_for_non_pie_world():
+    parser = build_parser()
+    args = parser.parse_args(
+        ["exec-console-command", "--world", "editor", "--pie-instance", "1", "stat", "fps"]
+    )
+    with pytest.raises(SystemExit, match="requires --world pie"):
+        cmd_exec_console_command(args)
+
+
 def test_cmd_exec_console_command_auto_starts_pie():
     parser = build_parser()
     args = parser.parse_args(["exec-console-command", "--auto-start-pie", "stat", "fps"])
@@ -2829,7 +2863,7 @@ def test_cmd_capture_screenshot_copies_to_requested_output_file(tmp_path, capsys
         str(output),
     ])
 
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": str(source), "mode": "file"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": str(source), "mode": "file"}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
 
     mock_call.assert_called_once_with(
@@ -2854,7 +2888,7 @@ def test_parser_capture_screenshot_invalid_mode():
 def test_cmd_capture_screenshot_window_calls_tool():
     parser = build_parser()
     args = parser.parse_args(["capture", "screenshot", "--source", "window"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": "/tmp/shot.png"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": "/tmp/shot.png"}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
     mock_call.assert_called_once_with("capture-screenshot", {"mode": "window"})
 
@@ -2862,7 +2896,7 @@ def test_cmd_capture_screenshot_window_calls_tool():
 def test_cmd_capture_screenshot_tab_calls_tool():
     parser = build_parser()
     args = parser.parse_args(["capture", "screenshot", "--source", "tab", "--window-name", "OutputLog"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": "/tmp/shot.png"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": "/tmp/shot.png"}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
     mock_call.assert_called_once_with(
         "capture-screenshot", {"mode": "tab", "window_name": "OutputLog"}
@@ -2872,7 +2906,7 @@ def test_cmd_capture_screenshot_tab_calls_tool():
 def test_cmd_capture_screenshot_region_calls_tool():
     parser = build_parser()
     args = parser.parse_args(["capture", "screenshot", "--source", "region", "--region", "10,20,800,600"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": "/tmp/shot.png"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": "/tmp/shot.png"}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
     mock_call.assert_called_once_with(
         "capture-screenshot", {"mode": "region", "region": [10, 20, 800, 600]}
@@ -2882,7 +2916,7 @@ def test_cmd_capture_screenshot_region_calls_tool():
 def test_cmd_capture_screenshot_viewport_calls_tool():
     parser = build_parser()
     args = parser.parse_args(["capture", "screenshot", "--source", "viewport", "--format", "png"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": "/tmp/shot.png"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": "/tmp/shot.png"}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
     mock_call.assert_called_once_with(
         "capture-screenshot", {"mode": "viewport", "format": "png"}
@@ -2892,7 +2926,7 @@ def test_cmd_capture_screenshot_viewport_calls_tool():
 def test_cmd_capture_screenshot_window_can_opt_out_of_safe_mode():
     parser = build_parser()
     args = parser.parse_args(["capture", "screenshot", "--source", "window", "--unsafe-slate-window-capture"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": "/tmp/shot.png"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": "/tmp/shot.png"}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
     mock_call.assert_called_once_with(
         "capture-screenshot", {"mode": "window", "safe_mode": False}
@@ -2911,7 +2945,7 @@ def test_cmd_capture_pie_screenshot_calls_safe_composited_mode():
         "--cleanup-previous",
     ])
     assert args.func == cmd_capture_screenshot
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"image_base64": "..."}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"image_base64": "..."}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
     mock_call.assert_called_once_with(
         "capture-screenshot",
@@ -2976,7 +3010,7 @@ def test_cmd_capture_screenshot_all_options():
         "--color-mode",
         "grayscale",
     ])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"image_base64": "..."}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"image_base64": "..."}, BridgeCallMeta())) as mock_call:
         cmd_capture_screenshot(args)
     mock_call.assert_called_once_with(
         "capture-screenshot",
@@ -3256,7 +3290,7 @@ def test_parser_capture_viewport_with_options():
 def test_cmd_capture_viewport_default():
     parser = build_parser()
     args = parser.parse_args(["capture", "viewport"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": "/tmp/vp.png"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": "/tmp/vp.png"}, BridgeCallMeta())) as mock_call:
         cmd_capture_viewport(args)
     mock_call.assert_called_once_with("capture-viewport", {})
 
@@ -3264,7 +3298,7 @@ def test_cmd_capture_viewport_default():
 def test_cmd_capture_viewport_with_format():
     parser = build_parser()
     args = parser.parse_args(["capture", "viewport", "--format", "png"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"file_path": "/tmp/vp.png"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"file_path": "/tmp/vp.png"}, BridgeCallMeta())) as mock_call:
         cmd_capture_viewport(args)
     mock_call.assert_called_once_with("capture-viewport", {"format": "png"})
 
@@ -3286,7 +3320,7 @@ def test_cmd_capture_viewport_all_options():
         "grayscale",
         "--cleanup-previous",
     ])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"image_base64": "..."}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"image_base64": "..."}, BridgeCallMeta())) as mock_call:
         cmd_capture_viewport(args)
     mock_call.assert_called_once_with(
         "capture-viewport",
@@ -3621,6 +3655,38 @@ def test_cloth_chaos_query_routes_to_bridge_tool():
     )
 
 
+def test_cloth_chaos_query_routes_gap_and_weight_diagnostics_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "chaos-query",
+        "/Game/Cloth/CA_Cape",
+        "--gap-tolerance",
+        "0.25",
+        "--gap-limit",
+        "32",
+        "--dump-weights",
+        "--weight-map",
+        "MaxDistance",
+        "--weight-limit",
+        "64",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-chaos-query",
+        {
+            "cloth_asset": "/Game/Cloth/CA_Cape",
+            "gap_tolerance": 0.25,
+            "gap_limit": 32,
+            "dump_weights": True,
+            "weight_map": "MaxDistance",
+            "weight_limit": 64,
+        },
+    )
+
+
 def test_cloth_convert_routes_to_bridge_tool():
     args = build_parser().parse_args([
         "cloth",
@@ -3730,6 +3796,41 @@ def test_cloth_chaos_stitch_routes_proximity_ranges_to_bridge_tool():
     )
 
 
+def test_cloth_chaos_stitch_dry_run_routes_without_save_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "chaos-stitch",
+        "/Game/Cloth/CA_Cape",
+        "--mode",
+        "proximity",
+        "--first-vertices",
+        "0-1",
+        "--second-vertices",
+        "10-11",
+        "--tolerance",
+        "0.1",
+        "--dry-run",
+        "--save",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-chaos-stitch",
+        {
+            "cloth_asset": "/Game/Cloth/CA_Cape",
+            "lod_index": 0,
+            "mode": "proximity",
+            "index_space": "2d",
+            "first_vertices": [0, 1],
+            "second_vertices": [10, 11],
+            "tolerance": 0.1,
+            "dry_run": True,
+        },
+    )
+
+
 def test_cloth_chaos_set_config_routes_json_properties_to_bridge_tool():
     args = build_parser().parse_args([
         "cloth",
@@ -3755,6 +3856,70 @@ def test_cloth_chaos_set_config_routes_json_properties_to_bridge_tool():
                 "NumIterations": 12,
             },
             "save": True,
+        },
+    )
+
+
+def test_cloth_chaos_set_weightmap_routes_explicit_vertices_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "chaos-set-weightmap",
+        "/Game/Cloth/CA_Cape",
+        "--lod-index",
+        "1",
+        "--weight-map",
+        "MaxDistance",
+        "--vertices",
+        "0-2,8",
+        "--value",
+        "0",
+        "--save",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-chaos-set-weightmap",
+        {
+            "cloth_asset": "/Game/Cloth/CA_Cape",
+            "lod_index": 1,
+            "weight_map": "MaxDistance",
+            "vertices": [0, 1, 2, 8],
+            "value": 0.0,
+            "save": True,
+        },
+    )
+
+
+def test_cloth_chaos_set_weightmap_routes_spatial_selection_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "chaos-set-weightmap",
+        "/Game/Cloth/CA_Cape",
+        "--z-min",
+        "120",
+        "--center",
+        "0,0,150",
+        "--radius",
+        "25",
+        "--value",
+        "5",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-chaos-set-weightmap",
+        {
+            "cloth_asset": "/Game/Cloth/CA_Cape",
+            "lod_index": 0,
+            "weight_map": "MaxDistance",
+            "z_min": 120.0,
+            "center": [0.0, 0.0, 150.0],
+            "radius": 25.0,
+            "value": 5.0,
         },
     )
 
@@ -3790,6 +3955,73 @@ def test_cloth_apply_weightmap_constant_family_routes_to_bridge_tool():
             "rule": "constant",
             "value": 25.0,
             "save": True,
+        },
+    )
+
+
+def test_cloth_apply_weightmap_anim_drive_target_routes_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "apply-weightmap",
+        "/Game/Characters/SK_Cape",
+        "--asset-name",
+        "CapeCloth",
+        "--target",
+        "anim-drive-stiffness",
+        "--rule",
+        "constant",
+        "--value",
+        "0.75",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-apply-weightmap",
+        {
+            "skeletal_mesh": "/Game/Characters/SK_Cape",
+            "asset_name": "CapeCloth",
+            "lod_index": 0,
+            "target": "anim-drive-stiffness",
+            "rule": "constant",
+            "value": 0.75,
+        },
+    )
+
+
+def test_cloth_apply_weightmap_extended_target_and_sections_route_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "apply-weightmap",
+        "/Game/Characters/SK_Cape",
+        "--asset-name",
+        "CapeCloth",
+        "--target",
+        "edge-stiffness",
+        "--rule",
+        "constant",
+        "--value",
+        "0.75",
+        "--section-index",
+        "1,3",
+        "--section-index",
+        "5",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-apply-weightmap",
+        {
+            "skeletal_mesh": "/Game/Characters/SK_Cape",
+            "asset_name": "CapeCloth",
+            "lod_index": 0,
+            "target": "edge-stiffness",
+            "rule": "constant",
+            "value": 0.75,
+            "section_indices": [1, 3, 5],
         },
     )
 
@@ -3831,6 +4063,103 @@ def test_cloth_apply_weightmap_bone_distance_family_routes_to_bridge_tool():
             "max_distance": 80.0,
             "curve": "smooth",
             "invert": True,
+            "save": True,
+        },
+    )
+
+
+def test_cloth_apply_weightmap_spatial_ramp_routes_selection_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "apply-weightmap",
+        "/Game/Characters/SK_Cape",
+        "--asset-name",
+        "CapeCloth",
+        "--lod-index",
+        "1",
+        "--target",
+        "max-distance",
+        "--rule",
+        "spatial",
+        "--z-min",
+        "100",
+        "--z-max",
+        "180",
+        "--center",
+        "0,0,140",
+        "--radius",
+        "60",
+        "--min-value",
+        "0",
+        "--max-value",
+        "20",
+        "--curve",
+        "smooth",
+        "--save",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-apply-weightmap",
+        {
+            "skeletal_mesh": "/Game/Characters/SK_Cape",
+            "asset_name": "CapeCloth",
+            "lod_index": 1,
+            "target": "max-distance",
+            "rule": "spatial",
+            "z_min": 100.0,
+            "z_max": 180.0,
+            "center": [0.0, 0.0, 140.0],
+            "radius": 60.0,
+            "min_value": 0.0,
+            "max_value": 20.0,
+            "curve": "smooth",
+            "save": True,
+        },
+    )
+
+
+def test_cloth_weld_routes_legacy_physical_mesh_selection_to_bridge_tool():
+    args = build_parser().parse_args([
+        "cloth",
+        "weld",
+        "/Game/Characters/SK_Cape",
+        "--asset-name",
+        "CapeCloth",
+        "--lod-index",
+        "1",
+        "--section-index",
+        "2",
+        "--tolerance",
+        "0.25",
+        "--z-min",
+        "100",
+        "--z-max",
+        "140",
+        "--center",
+        "0,0,120",
+        "--radius",
+        "30",
+        "--save",
+    ])
+
+    with patch("soft_ue_cli.__main__._run_tool", return_value={"success": True}) as mock_run:
+        args.func(args)
+
+    mock_run.assert_called_once_with(
+        "cloth-weld",
+        {
+            "skeletal_mesh": "/Game/Characters/SK_Cape",
+            "asset_name": "CapeCloth",
+            "lod_index": 1,
+            "section_index": 2,
+            "tolerance": 0.25,
+            "z_min": 100.0,
+            "z_max": 140.0,
+            "center": [0.0, 0.0, 120.0],
+            "radius": 30.0,
             "save": True,
         },
     )
@@ -5355,7 +5684,7 @@ def test_parser_query_enum():
 def test_cmd_query_enum_calls_tool():
     parser = build_parser()
     args = parser.parse_args(["query-enum", "/Game/Data/E_MenuState"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"enumerators": []}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"enumerators": []}, BridgeCallMeta())) as mock_call:
         cmd_query_enum(args)
     mock_call.assert_called_once_with("query-enum", {"asset_path": "/Game/Data/E_MenuState"})
 
@@ -5370,7 +5699,7 @@ def test_parser_query_struct():
 def test_cmd_query_struct_calls_tool():
     parser = build_parser()
     args = parser.parse_args(["query-struct", "/Game/Data/S_Result"])
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"members": []}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"members": []}, BridgeCallMeta())) as mock_call:
         cmd_query_struct(args)
     mock_call.assert_called_once_with("query-struct", {"asset_path": "/Game/Data/S_Result"})
 
@@ -5423,7 +5752,7 @@ def test_pie_session_continue_on_blueprint_compile_errors_forwards_action():
     ])
     assert args.func == cmd_pie_session
 
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"state": "starting"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"state": "starting"}, BridgeCallMeta())) as mock_call:
         cmd_pie_session(args)
 
     mock_call.assert_called_once_with(
@@ -5441,7 +5770,7 @@ def test_pie_session_blueprint_error_report_preflight_forwards_options():
         "--preflight-blueprints",
     ])
 
-    with patch("soft_ue_cli.__main__.call_tool", return_value={"state": "blocked_by_blueprint_compile_errors"}) as mock_call:
+    with patch("soft_ue_cli.__main__.call_tool_ex", return_value=({"state": "blocked_by_blueprint_compile_errors"}, BridgeCallMeta())) as mock_call:
         cmd_pie_session(args)
 
     mock_call.assert_called_once_with(
@@ -5711,3 +6040,273 @@ def test_call_function_batch_json_forwards(tmp_path):
         "call-function",
         {"function_name": "Bar", "class_path": "/Game/Foo", "use_cdo": True, "batch": batch},
     )
+
+
+def test_format_session_notices_is_empty_for_no_notices():
+    from soft_ue_cli.__main__ import format_session_notices
+
+    assert format_session_notices([]) == ""
+
+
+def test_format_session_notices_names_party_and_action():
+    from soft_ue_cli.__main__ import format_session_notices
+
+    text = format_session_notices([
+        {
+            "kind": "ask",
+            "from_label": "codex:cloth-weld",
+            "text": "can I build-and-relaunch now?",
+            "reply_with": "soft-ue-cli session answer --id a-77 --decision wait",
+        }
+    ])
+
+    assert "codex:cloth-weld" in text
+    assert "can I build-and-relaunch now?" in text
+    assert "session answer --id a-77" in text
+    assert "WARNING" not in text
+    assert "⚠" not in text
+
+
+def test_session_parser_exposes_all_leaves():
+    parser = build_parser()
+    for leaf in ["announce", "list", "broadcast", "ask", "answer", "inbox", "leave"]:
+        args = parser.parse_args(["session", leaf] + _session_leaf_required_args(leaf))
+        assert args.session_action == leaf
+
+
+def _session_leaf_required_args(leaf):
+    return {
+        "announce": [],
+        "list": [],
+        "broadcast": ["--message", "hi"],
+        "ask": ["--to", "other", "--question", "ok to rebuild?"],
+        "answer": ["--id", "a-77", "--answer", "wait 3 min"],
+        "inbox": [],
+        "leave": [],
+    }[leaf]
+
+
+def test_session_as_flag_defaults_to_env(monkeypatch):
+    monkeypatch.setenv("SOFT_UE_SESSION", "cape-cloth")
+    parser = build_parser()
+    args = parser.parse_args(["session", "list"])
+    assert args.session_as == "cape-cloth"
+
+
+def test_session_announce_sends_resources_as_list():
+    captured = {}
+    with patch.object(main_mod, "_run_tool", lambda name, arguments, **kw: captured.update(
+        {"name": name, "arguments": arguments}
+    ) or {}):
+        args = build_parser().parse_args([
+            "session", "announce", "--as", "cape-cloth",
+            "--status", "converting cloth",
+            "--resources", "/Game/A,/Game/B",
+        ])
+        args.func(args)
+
+    assert captured["name"] == "session"
+    assert captured["arguments"]["action"] == "announce"
+    assert captured["arguments"]["resources"] == ["/Game/A", "/Game/B"]
+    assert captured["arguments"]["status"] == "converting cloth"
+
+
+def _fake_clock():
+    """A deterministic stand-in for time.monotonic/time.sleep.
+
+    time.sleep(n) advances the fake clock by n instead of actually sleeping,
+    so poll loops that call time.sleep(2.0) between iterations run instantly
+    in tests while still exercising the real deadline arithmetic.
+    """
+    state = {"t": 0.0}
+
+    def fake_monotonic():
+        return state["t"]
+
+    def fake_sleep(seconds):
+        state["t"] += seconds
+
+    return fake_monotonic, fake_sleep
+
+
+def test_poll_for_answer_returns_no_answer_on_expiry(monkeypatch):
+    fake_monotonic, fake_sleep = _fake_clock()
+    monkeypatch.setattr(main_mod.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(main_mod.time, "sleep", fake_sleep)
+
+    calls = []
+
+    def fake_run_tool(name, arguments, **kw):
+        calls.append(arguments)
+        return {"silent": [{"session": "cape-cloth", "last_seen_s": 5}]}
+
+    with patch.object(main_mod, "_run_tool", fake_run_tool):
+        args = argparse.Namespace(session_as="builder")
+        result = main_mod._poll_for_answer(args, "a-77", 5.0)
+
+    assert result["status"] == "no_answer"
+    assert result["ask_id"] == "a-77"
+    assert result["waited_s"] == 5
+    assert result["answered"] == []
+    assert result["silent"] == [{"session": "cape-cloth", "last_seen_s": 5}]
+    assert "Silence is NOT consent" in result["guidance"]
+
+    # Each poll must hit the same ask_id via the inbox action, never a new ask.
+    assert len(calls) == 3
+    for call in calls:
+        assert call["action"] == "inbox"
+        assert call["ask_id"] == "a-77"
+        assert call["no_mark_read"] is True
+
+
+def test_poll_for_answer_returns_early_when_answer_arrives(monkeypatch):
+    fake_monotonic, fake_sleep = _fake_clock()
+    monkeypatch.setattr(main_mod.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(main_mod.time, "sleep", fake_sleep)
+
+    responses = [
+        {"silent": [{"session": "cape-cloth"}]},
+        {"answers": [{"from_label": "cape-cloth", "text": "go ahead"}]},
+    ]
+    calls = []
+
+    def fake_run_tool(name, arguments, **kw):
+        calls.append(arguments)
+        return responses[len(calls) - 1]
+
+    with patch.object(main_mod, "_run_tool", fake_run_tool):
+        args = argparse.Namespace(session_as="builder")
+        result = main_mod._poll_for_answer(args, "a-77", 30.0)
+
+    # Returns the exact payload from the poll where "answers" first appeared,
+    # not a re-derived summary, and stops polling immediately after.
+    assert result == responses[1]
+    assert len(calls) == 2
+
+
+def test_session_inbox_wait_returns_once_messages_appear(monkeypatch):
+    fake_monotonic, fake_sleep = _fake_clock()
+    monkeypatch.setattr(main_mod.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(main_mod.time, "sleep", fake_sleep)
+
+    responses = [{}, {"messages": [{"text": "hi"}]}]
+    calls = []
+    printed = {}
+
+    def fake_run_tool(name, arguments, **kw):
+        calls.append(arguments)
+        return responses[len(calls) - 1]
+
+    with patch.object(main_mod, "_run_tool", fake_run_tool), patch.object(
+        main_mod, "_print_json", lambda data: printed.update(result=data)
+    ):
+        args = argparse.Namespace(
+            session_as="builder",
+            unread_only=False,
+            no_mark_read=False,
+            since=None,
+            wait=30.0,
+        )
+        main_mod.cmd_session_inbox(args)
+
+    assert printed["result"] == responses[1]
+    assert len(calls) == 2
+    for call in calls:
+        assert call["action"] == "inbox"
+
+
+def test_session_inbox_wait_terminates_when_nothing_ever_arrives(monkeypatch):
+    fake_monotonic, fake_sleep = _fake_clock()
+    monkeypatch.setattr(main_mod.time, "monotonic", fake_monotonic)
+    monkeypatch.setattr(main_mod.time, "sleep", fake_sleep)
+
+    calls = []
+    printed = {}
+
+    def fake_run_tool(name, arguments, **kw):
+        calls.append(arguments)
+        return {}
+
+    with patch.object(main_mod, "_run_tool", fake_run_tool), patch.object(
+        main_mod, "_print_json", lambda data: printed.update(result=data)
+    ):
+        args = argparse.Namespace(
+            session_as="builder",
+            unread_only=False,
+            no_mark_read=False,
+            since=None,
+            wait=5.0,
+        )
+        main_mod.cmd_session_inbox(args)
+
+    # Still returns the last (empty) result once the deadline passes, rather
+    # than looping forever.
+    assert printed["result"] == {}
+    assert len(calls) == 4
+
+
+def test_claude_md_section_recruits_sessions_into_the_channel():
+    section = _claude_md_section("soft-ue-cli")
+
+    assert "session announce" in section
+    assert "session list" in section
+    assert "session inbox" in section
+    assert "session ask" in section
+    assert "session leave" in section
+    assert "skills get session-protocol" in section
+
+
+def test_claude_md_section_carries_identity_on_every_session_command():
+    """Identity is per-command, not per-shell, and only the env prefix is universal.
+
+    ``--as`` exists on the ``session`` leaves alone, so an example that used it
+    would teach a form that fails on ``pie-session start``. ``export`` does not
+    survive between Claude Code Bash calls either. Every invocation shown here
+    must therefore carry the inline ``SOFT_UE_SESSION=`` prefix.
+    """
+    section = _claude_md_section("soft-ue-cli")
+
+    invocations = [line for line in section.splitlines() if "soft-ue-cli session " in line]
+    assert invocations
+    for invocation in invocations:
+        assert "SOFT_UE_SESSION=<your-name>" in invocation, (
+            f"session command without identity: {invocation}"
+        )
+        assert "--as" not in invocation, (
+            f"session command mixing identity forms: {invocation}"
+        )
+
+
+def test_claude_md_section_shows_the_prefix_on_a_non_session_command():
+    """The failure this block exists to prevent is a PIE claim on a nameless row.
+
+    Showing the prefix only on ``session`` commands is what leads an agent to
+    announce as ``cape-cloth`` and then claim ``pie`` as ``unknown:<origin>``.
+    """
+    section = _claude_md_section("soft-ue-cli")
+
+    assert "SOFT_UE_SESSION=<your-name> soft-ue-cli pie-session start" in section
+
+
+def test_session_help_examples_use_the_universal_identity_form():
+    """`session --help` is the third place an agent learns the identity form.
+
+    Examples using `--as` here are valid, but they teach the generalization that
+    breaks on `pie-session start --as <name>`.
+    """
+    epilog = build_parser()._subparsers._group_actions[0].choices["session"].description
+
+    example_lines = [line for line in epilog.splitlines() if "soft-ue-cli session" in line]
+    assert example_lines
+    for line in example_lines:
+        assert "SOFT_UE_SESSION=" in line, f"example without identity: {line}"
+        assert "--as" not in line, f"example mixing identity forms: {line}"
+
+
+def test_as_flag_exists_only_on_session_commands():
+    """Pins the claim the docs now make: ``--as`` elsewhere is an argparse error."""
+    parser = build_parser()
+
+    assert parser.parse_args(["session", "list", "--as", "cape-cloth"]).session_as == "cape-cloth"
+    with pytest.raises(SystemExit):
+        parser.parse_args(["pie-session", "start", "--as", "cape-cloth"])
