@@ -100,9 +100,6 @@ public class SoftUEBridgeEditor : ModuleRules
 			// Python Scripting
 			"PythonScriptPlugin",
 
-			// Live Coding
-			"LiveCoding",
-
 			// Source Control (for SCM diff tool)
 			"SourceControl",
 
@@ -119,5 +116,13 @@ public class SoftUEBridgeEditor : ModuleRules
 			"TraceAnalysis",
 			"TraceServices"
 		});
+
+		// Live Coding is a Windows-only module (Engine/Source/Developer/Windows/LiveCoding).
+		// TriggerLiveCodingTool only touches it under PLATFORM_WINDOWS, so an unconditional
+		// dependency fails to link on Mac/Linux (UnrealEditor-LiveCoding.dylib does not exist).
+		if (Target.Platform == UnrealTargetPlatform.Win64)
+		{
+			PrivateDependencyModuleNames.Add("LiveCoding");
+		}
 	}
 }
